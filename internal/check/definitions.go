@@ -25,6 +25,17 @@ type (
 	LimitationKind string
 )
 
+// IsMember reports whether the result is the decisive IsMember state.
+func (r Result) IsMember() bool {
+	return r.Membership == IsMember
+}
+
+// IsTruncated reports whether evaluation ended without a decisive membership
+// answer because a configured traversal limit was reached.
+func (r Result) IsTruncated() bool {
+	return r.Err == nil && r.Membership == MembershipUnknown && r.Limitation != ""
+}
+
 //go:generate stringer -type Membership
 const (
 	MembershipUnknown Membership = iota

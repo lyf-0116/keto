@@ -150,6 +150,23 @@ export declare type CheckResponse =
     allowed: boolean
 
     /**
+     * A non-empty limitation means the check was truncated and `allowed`
+     * is not a definitive membership answer. Common values are
+     * `max_depth_exceeded` and `max_width_exceeded`.
+     *
+     * @generated from field: string limitation = 3;
+     */
+    limitation: string
+
+    /**
+     * Whether evaluation was truncated by a depth or width limit. When true,
+     * `allowed=false` is indeterminate and `limitation` contains the reason.
+     *
+     * @generated from field: bool truncated = 4;
+     */
+    truncated: boolean
+
+    /**
      * This field is not implemented yet and has no effect.
      * <!--
      * The last known snapshot token ONLY specified if
@@ -201,6 +218,23 @@ export declare type CheckResponseWithError =
      * @generated from field: string error = 2;
      */
     error: string
+
+    /**
+     * A non-empty limitation means the check was truncated and `allowed`
+     * is not a definitive membership answer. Common values are
+     * `max_depth_exceeded` and `max_width_exceeded`.
+     *
+     * @generated from field: string limitation = 4;
+     */
+    limitation: string
+
+    /**
+     * Whether evaluation was truncated by a depth or width limit. When true,
+     * `allowed=false` is indeterminate.
+     *
+     * @generated from field: bool truncated = 5;
+     */
+    truncated: boolean
 
     /**
      * This field is not implemented yet and has no effect.

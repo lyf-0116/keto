@@ -84,6 +84,13 @@ message CheckResponse {
   //
   // It is false by default if no ACL matches.
   bool allowed = 1;
+  // A non-empty limitation means the check was truncated and `allowed`
+  // is not a definitive membership answer. Common values are
+  // `max_depth_exceeded` and `max_width_exceeded`.
+  string limitation = 3;
+  // Whether evaluation was truncated by a depth or width limit. When true,
+  // `allowed=false` is indeterminate and `limitation` contains the reason.
+  bool truncated = 4;
   // This field is not implemented yet and has no effect.
   // <!--
   // The last known snapshot token ONLY specified if
@@ -112,6 +119,13 @@ message CheckResponseWithError {
   //
   // If the check was performed successfully, this will be empty.
   string error = 2;
+  // A non-empty limitation means the check was truncated and `allowed`
+  // is not a definitive membership answer. Common values are
+  // `max_depth_exceeded` and `max_width_exceeded`.
+  string limitation = 4;
+  // Whether evaluation was truncated by a depth or width limit. When true,
+  // `allowed=false` is indeterminate.
+  bool truncated = 5;
   // This field is not implemented yet and has no effect.
   // <!--
   // The last known snapshot token ONLY specified if

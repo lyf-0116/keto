@@ -358,13 +358,13 @@ func TestEngine(t *testing.T) {
 					for _, tuple := range tc.expectedMembers {
 						res, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tuple), 5)
 						require.NoError(t, err)
-						assert.Truef(t, res, "expected %q to be a member", tuple)
+						assert.Truef(t, res.IsMember(), "expected %q to be a member", tuple)
 					}
 
 					for _, tuple := range tc.expectedNonMembers {
 						res, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tuple), 5)
 						require.NoError(t, err)
-						assert.Falsef(t, res, "expected %q to not be a member", tuple)
+						assert.Falsef(t, res.IsMember(), "expected %q to not be a member", tuple)
 					}
 				})
 			}
@@ -383,21 +383,21 @@ func TestEngine(t *testing.T) {
 
 			res, err := e.CheckIsMember(ctx, tuple, 1)
 			require.NoError(t, err)
-			assert.False(t, res, "depth=1 is not enough for a 2-hop chain")
+			assert.False(t, res.IsMember(), "depth=1 is not enough for a 2-hop chain")
 
 			res, err = e.CheckIsMember(ctx, tuple, 2)
 			require.NoError(t, err)
-			assert.True(t, res, "depth=2 is enough for a 2-hop chain")
+			assert.True(t, res.IsMember(), "depth=2 is enough for a 2-hop chain")
 
 			require.NoError(t, reg.Config(ctx).Set(config.KeyLimitMaxReadDepth, 1))
 			res, err = e.CheckIsMember(ctx, tuple, 5)
 			require.NoError(t, err)
-			assert.False(t, res, "global max-depth=1 overrides request depth=5")
+			assert.False(t, res.IsMember(), "global max-depth=1 overrides request depth=5")
 
 			require.NoError(t, reg.Config(ctx).Set(config.KeyLimitMaxReadDepth, 3))
 			res, err = e.CheckIsMember(ctx, tuple, 0)
 			require.NoError(t, err)
-			assert.True(t, res, "global max-depth=3 is enough")
+			assert.True(t, res.IsMember(), "global max-depth=3 is enough")
 		})
 	})
 
@@ -531,9 +531,9 @@ func TestWidthLimit(t *testing.T) {
 				assert.Equal(t, tc.expectedMembership, res.Membership)
 				assert.Equal(t, tc.expectedLimitation, res.Limitation)
 
-				isMember, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, "Resource:doc#readers@"+tc.subject), 10)
+				memberResult, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, "Resource:doc#readers@"+tc.subject), 10)
 				require.NoError(t, err)
-				assert.Equal(t, tc.expectedIsMember, isMember)
+				assert.Equal(t, tc.expectedIsMember, memberResult.IsMember())
 			})
 
 			// in strict mode, expect Error when limitation is hit
@@ -556,9 +556,9 @@ func TestWidthLimit(t *testing.T) {
 					require.ErrorAs(t, err, &he)
 					assert.Contains(t, he.Reason(), string(tc.expectedLimitation))
 				} else {
-					isMember, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, "Resource:doc#readers@"+tc.subject), 10)
+					memberResult, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, "Resource:doc#readers@"+tc.subject), 10)
 					require.NoError(t, err)
-					assert.Equal(t, tc.expectedIsMember, isMember)
+					assert.Equal(t, tc.expectedIsMember, memberResult.IsMember())
 				}
 			})
 		})
@@ -718,9 +718,9 @@ func TestDepthLimit(t *testing.T) {
 				assert.Equal(t, tc.expectedMembership, res.Membership)
 				assert.Equal(t, tc.expectedLimitation, res.Limitation)
 
-				isMember, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tc.tuple), 10)
+				memberResult, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tc.tuple), 10)
 				require.NoError(t, err)
-				assert.Equal(t, tc.expectedIsMember, isMember)
+				assert.Equal(t, tc.expectedIsMember, memberResult.IsMember())
 			})
 
 			// in strict mode, expect Error when limitation is hit
@@ -743,9 +743,9 @@ func TestDepthLimit(t *testing.T) {
 					require.ErrorAs(t, err, &he)
 					assert.Contains(t, he.Reason(), string(tc.expectedLimitation))
 				} else {
-					isMember, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tc.tuple), 10)
+					memberResult, err := e.CheckIsMember(ctx, testhelpers.TupleFromString(t, tc.tuple), 10)
 					require.NoError(t, err)
-					assert.Equal(t, tc.expectedIsMember, isMember)
+					assert.Equal(t, tc.expectedIsMember, memberResult.IsMember())
 				}
 			})
 		})

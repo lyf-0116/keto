@@ -90,9 +90,17 @@
           "allowed": {
             "description": "whether the relation tuple is allowed",
             "type": "boolean"
+          },
+          "limitation": {
+            "description": "The traversal limitation that truncated the check, if any.",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Whether the check was truncated and therefore allowed is not a definitive membership answer.",
+            "type": "boolean"
           }
         },
-        "required": ["allowed"],
+        "required": ["allowed", "truncated"],
         "title": "Check Permission Result",
         "type": "object"
       },
@@ -106,9 +114,17 @@
           "error": {
             "description": "any error generated while checking the relation tuple",
             "type": "string"
+          },
+          "limitation": {
+            "description": "The traversal limitation that truncated the check, if any.",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "Whether the check was truncated and therefore allowed is not a definitive membership answer.",
+            "type": "boolean"
           }
         },
-        "required": ["allowed"],
+        "required": ["allowed", "truncated"],
         "type": "object"
       },
       "createRelationshipBody": {

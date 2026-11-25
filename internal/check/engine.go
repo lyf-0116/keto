@@ -57,17 +57,19 @@ func NewEngine(d EngineDependencies) *Engine {
 }
 
 // CheckIsMember checks if the relation tuple's subject has the relation on the
-// object in the namespace either directly or indirectly and returns a boolean
-// result.
-func (e *Engine) CheckIsMember(ctx context.Context, r *relationTuple, restDepth int) (bool, error) {
+// object in the namespace either directly or indirectly. The returned Result
+// preserves indeterminate/truncated outcomes; callers decide whether to deny,
+// retry, or surface that state. In strict mode a truncation is also returned as
+// an error, while the result remains available for inspection.
+func (e *Engine) CheckIsMember(ctx context.Context, r *relationTuple, restDepth int) (Result, error) {
 	result := e.CheckRelationTuple(ctx, r, restDepth)
 	if result.Err != nil {
-		return false, result.Err
+		return result, result.Err
 	}
-	if result.Membership == MembershipUnknown && result.Limitation != "" && e.dep.Config(ctx).StrictMode() {
-		return false, errLimitationExceeded().WithReason(string(result.Limitation))
+	if result.IsTruncated() && e.dep.Config(ctx).StrictMode() {
+		return result, errLimitationExceeded().WithReason(string(result.Limitation))
 	}
-	return result.Membership == IsMember, nil
+	return result, nil
 }
 
 // CheckRelationTuple checks if the relation tuple's subject has the relation on

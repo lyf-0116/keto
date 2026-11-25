@@ -192,6 +192,13 @@ type CheckResponse struct {
 	//
 	// It is false by default if no ACL matches.
 	Allowed bool `protobuf:"varint,1,opt,name=allowed,proto3" json:"allowed,omitempty"`
+	// A non-empty limitation means the check was truncated and `allowed`
+	// is not a definitive membership answer. Common values are
+	// `max_depth_exceeded` and `max_width_exceeded`.
+	Limitation string `protobuf:"bytes,3,opt,name=limitation,proto3" json:"limitation,omitempty"`
+	// Whether evaluation was truncated by a depth or width limit. When true,
+	// `allowed=false` is indeterminate and `limitation` contains the reason.
+	Truncated bool `protobuf:"varint,4,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	// This field is not implemented yet and has no effect.
 	// <!--
 	// The last known snapshot token ONLY specified if
@@ -247,6 +254,20 @@ func (x *CheckResponse) GetAllowed() bool {
 	return false
 }
 
+func (x *CheckResponse) GetLimitation() string {
+	if x != nil {
+		return x.Limitation
+	}
+	return ""
+}
+
+func (x *CheckResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 func (x *CheckResponse) GetSnaptoken() string {
 	if x != nil {
 		return x.Snaptoken
@@ -267,6 +288,13 @@ type CheckResponseWithError struct {
 	//
 	// If the check was performed successfully, this will be empty.
 	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	// A non-empty limitation means the check was truncated and `allowed`
+	// is not a definitive membership answer. Common values are
+	// `max_depth_exceeded` and `max_width_exceeded`.
+	Limitation string `protobuf:"bytes,4,opt,name=limitation,proto3" json:"limitation,omitempty"`
+	// Whether evaluation was truncated by a depth or width limit. When true,
+	// `allowed=false` is indeterminate.
+	Truncated bool `protobuf:"varint,5,opt,name=truncated,proto3" json:"truncated,omitempty"`
 	// This field is not implemented yet and has no effect.
 	// <!--
 	// The last known snapshot token ONLY specified if
@@ -327,6 +355,20 @@ func (x *CheckResponseWithError) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *CheckResponseWithError) GetLimitation() string {
+	if x != nil {
+		return x.Limitation
+	}
+	return ""
+}
+
+func (x *CheckResponseWithError) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
 }
 
 func (x *CheckResponseWithError) GetSnaptoken() string {
@@ -506,13 +548,21 @@ const file_ory_keto_relation_tuples_v1alpha2_check_service_proto_rawDesc = "" +
 	"\x05tuple\x18\b \x01(\v20.ory.keto.relation_tuples.v1alpha2.RelationTupleR\x05tuple\x12\x16\n" +
 	"\x06latest\x18\x05 \x01(\bR\x06latest\x12\x1c\n" +
 	"\tsnaptoken\x18\x06 \x01(\tR\tsnaptoken\x12\x1b\n" +
-	"\tmax_depth\x18\a \x01(\x05R\bmaxDepth\"G\n" +
+	"\tmax_depth\x18\a \x01(\x05R\bmaxDepth\"\x85\x01\n" +
 	"\rCheckResponse\x12\x18\n" +
-	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1c\n" +
-	"\tsnaptoken\x18\x02 \x01(\tR\tsnaptoken\"f\n" +
+	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x1e\n" +
+	"\n" +
+	"limitation\x18\x03 \x01(\tR\n" +
+	"limitation\x12\x1c\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated\x12\x1c\n" +
+	"\tsnaptoken\x18\x02 \x01(\tR\tsnaptoken\"\xa4\x01\n" +
 	"\x16CheckResponseWithError\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1c\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1e\n" +
+	"\n" +
+	"limitation\x18\x04 \x01(\tR\n" +
+	"limitation\x12\x1c\n" +
+	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tsnaptoken\x18\x03 \x01(\tR\tsnaptoken\"\xb0\x01\n" +
 	"\x11BatchCheckRequest\x12H\n" +
 	"\x06tuples\x18\x01 \x03(\v20.ory.keto.relation_tuples.v1alpha2.RelationTupleR\x06tuples\x12\x16\n" +

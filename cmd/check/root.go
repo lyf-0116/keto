@@ -16,12 +16,20 @@ import (
 )
 
 type checkOutput struct {
-	Allowed bool `json:"allowed"`
+	Allowed    bool   `json:"allowed"`
+	Truncated  bool   `json:"truncated,omitempty"`
+	Limitation string `json:"limitation,omitempty"`
 }
 
 func (o *checkOutput) String() string {
 	if o.Allowed {
 		return "Allowed\n"
+	}
+	if o.Truncated {
+		if o.Limitation != "" {
+			return fmt.Sprintf("Unknown (check was truncated: %s)\n", o.Limitation)
+		}
+		return "Unknown (check was truncated)\n"
 	}
 	return "Denied\n"
 }
@@ -83,7 +91,11 @@ func check(cmd *cobra.Command, args []string) error {
 		return cmdx.FailSilently(cmd)
 	}
 
-	cmdx.PrintJSONAble(cmd, &checkOutput{Allowed: resp.Allowed})
+	cmdx.PrintJSONAble(cmd, &checkOutput{
+		Allowed:    resp.Allowed,
+		Truncated:  resp.Truncated,
+		Limitation: resp.Limitation,
+	})
 	return nil
 }
 

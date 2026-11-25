@@ -353,6 +353,59 @@ func TestCheckStrictModeLimit(t *testing.T) {
 	})
 }
 
+func TestCheckTruncationInNonStrictMode(t *testing.T) {
+	depthLimitScenario.Run(t, func(t *testing.T, reg driver.Registry) {
+		require.NoError(t, reg.Config(t.Context()).Set(config.KeyLimitMaxReadDepth, 2))
+		h := check.NewHandler(reg)
+		tupleQuery := testhelpers.APITupleFromString(t, "Resource:doc#union@User:Alice").ToURLQuery()
+
+		t.Run("case=REST openapi: returns truncation details", func(t *testing.T) {
+			router := httprouterx.NewRouterPublic()
+			h.RegisterReadRoutes(router)
+			ts := httptest.NewServer(router)
+			t.Cleanup(ts.Close)
+
+			resp, err := ts.Client().Get(ts.URL + check.OpenAPIRouteBase + "?max-depth=2&" + tupleQuery.Encode())
+			require.NoError(t, err)
+			body := readBody(t, resp)
+
+			require.Equal(t, http.StatusOK, resp.StatusCode, "%s", body)
+			require.False(t, gjson.GetBytes(body, "allowed").Bool(), "%s", body)
+			require.True(t, gjson.GetBytes(body, "truncated").Bool(), "%s", body)
+			require.Equal(t, string(check.LimitationMaxDepthExceeded), gjson.GetBytes(body, "limitation").String(), "%s", body)
+		})
+
+		t.Run("case=REST mirror: denied response still contains truncation details", func(t *testing.T) {
+			router := httprouterx.NewRouterPublic()
+			h.RegisterReadRoutes(router)
+			ts := httptest.NewServer(router)
+			t.Cleanup(ts.Close)
+
+			resp, err := ts.Client().Get(ts.URL + check.RouteBase + "?max-depth=2&" + tupleQuery.Encode())
+			require.NoError(t, err)
+			body := readBody(t, resp)
+
+			require.Equal(t, http.StatusForbidden, resp.StatusCode, "%s", body)
+			require.False(t, gjson.GetBytes(body, "allowed").Bool(), "%s", body)
+			require.True(t, gjson.GetBytes(body, "truncated").Bool(), "%s", body)
+			require.Equal(t, string(check.LimitationMaxDepthExceeded), gjson.GetBytes(body, "limitation").String(), "%s", body)
+		})
+
+		t.Run("case=gRPC: returns truncation details", func(t *testing.T) {
+			checkClient := newTestGRPCCheckClient(t, h)
+			tuple := testhelpers.APITupleFromString(t, "Resource:doc#union@User:Alice")
+			resp, err := checkClient.Check(t.Context(), &rts.CheckRequest{
+				Tuple:    tuple.ToProto(),
+				MaxDepth: 2,
+			})
+			require.NoError(t, err)
+			require.False(t, resp.Allowed)
+			require.True(t, resp.Truncated)
+			require.Equal(t, string(check.LimitationMaxDepthExceeded), resp.Limitation)
+		})
+	})
+}
+
 func TestBatchCheckLimitHandler(t *testing.T) {
 	for _, scenario := range []testhelpers.Scenario{
 		widthLimitScenario,
@@ -387,6 +440,8 @@ func TestBatchCheckLimitHandler(t *testing.T) {
 				require.NoError(t, json.Unmarshal(readBody(t, resp), &result))
 				require.Len(t, result.Results, 1)
 				require.False(t, result.Results[0].Allowed)
+				require.True(t, result.Results[0].Truncated)
+				require.Equal(t, string(check.LimitationMaxWidthExceeded), result.Results[0].GetLimitation())
 				if strict {
 					require.NotNil(t, result.Results[0].Error)
 					require.Contains(t, *result.Results[0].Error, string(check.LimitationMaxWidthExceeded))
@@ -404,6 +459,8 @@ func TestBatchCheckLimitHandler(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, resp.Results, 1)
 				require.False(t, resp.Results[0].Allowed)
+				require.True(t, resp.Results[0].Truncated)
+				require.Equal(t, string(check.LimitationMaxWidthExceeded), resp.Results[0].Limitation)
 				if strict {
 					require.Contains(t, resp.Results[0].Error, string(check.LimitationMaxWidthExceeded))
 				} else {

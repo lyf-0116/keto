@@ -19,6 +19,10 @@ import (
 type CheckPermissionResultWithError struct {
 	// whether the relation tuple is allowed
 	Allowed bool `json:"allowed"`
+	// Whether the check was truncated and allowed is not definitive.
+	Truncated bool `json:"truncated"`
+	// The traversal limitation that truncated the check, if any.
+	Limitation *string `json:"limitation,omitempty"`
 	// any error generated while checking the relation tuple
 	Error *string `json:"error,omitempty"`
 }
@@ -27,9 +31,10 @@ type CheckPermissionResultWithError struct {
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewCheckPermissionResultWithError(allowed bool) *CheckPermissionResultWithError {
+func NewCheckPermissionResultWithError(allowed bool, truncated bool) *CheckPermissionResultWithError {
 	this := CheckPermissionResultWithError{}
 	this.Allowed = allowed
+	this.Truncated = truncated
 	return &this
 }
 
@@ -63,6 +68,61 @@ func (o *CheckPermissionResultWithError) GetAllowedOk() (*bool, bool) {
 // SetAllowed sets field value
 func (o *CheckPermissionResultWithError) SetAllowed(v bool) {
 	o.Allowed = v
+}
+
+// GetTruncated returns the Truncated field value.
+func (o *CheckPermissionResultWithError) GetTruncated() bool {
+	if o == nil {
+		var ret bool
+		return ret
+	}
+	return o.Truncated
+}
+
+// GetTruncatedOk returns a tuple with the Truncated field value
+// and a boolean to check if the value has been set.
+func (o *CheckPermissionResultWithError) GetTruncatedOk() (*bool, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.Truncated, true
+}
+
+// SetTruncated sets field value.
+func (o *CheckPermissionResultWithError) SetTruncated(v bool) {
+	o.Truncated = v
+}
+
+// GetLimitation returns the Limitation field value if set, zero value otherwise.
+func (o *CheckPermissionResultWithError) GetLimitation() string {
+	if o == nil || o.Limitation == nil {
+		var ret string
+		return ret
+	}
+	return *o.Limitation
+}
+
+// GetLimitationOk returns a tuple with the Limitation field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *CheckPermissionResultWithError) GetLimitationOk() (*string, bool) {
+	if o == nil || o.Limitation == nil {
+		return nil, false
+	}
+	return o.Limitation, true
+}
+
+// HasLimitation returns a boolean if a field has been set.
+func (o *CheckPermissionResultWithError) HasLimitation() bool {
+	if o != nil && o.Limitation != nil {
+		return true
+	}
+
+	return false
+}
+
+// SetLimitation gets a reference to the given string and assigns it to the Limitation field.
+func (o *CheckPermissionResultWithError) SetLimitation(v string) {
+	o.Limitation = &v
 }
 
 // GetError returns the Error field value if set, zero value otherwise.
@@ -101,6 +161,12 @@ func (o CheckPermissionResultWithError) MarshalJSON() ([]byte, error) {
 	toSerialize := map[string]interface{}{}
 	if true {
 		toSerialize["allowed"] = o.Allowed
+	}
+	if true {
+		toSerialize["truncated"] = o.Truncated
+	}
+	if o.Limitation != nil {
+		toSerialize["limitation"] = o.Limitation
 	}
 	if o.Error != nil {
 		toSerialize["error"] = o.Error
