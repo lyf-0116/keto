@@ -23,39 +23,106 @@ import (
 
 var _ relationtuplesconnect.WriteServiceHandler = (*WriteHandler)(nil)
 
-func protoTuplesWithAction(deltas []*rts.RelationTupleDelta, action rts.RelationTupleDelta_Action) (filtered []*ketoapi.RelationTuple, err error) {
+type tupleDelta struct {
+	action        ketoapi.PatchAction
+	relationTuple *ketoapi.RelationTuple
+}
+
+func protoAction(action rts.RelationTupleDelta_Action) ketoapi.PatchAction {
+	switch action {
+	case rts.RelationTupleDelta_ACTION_INSERT:
+		return ketoapi.ActionInsert
+	case rts.RelationTupleDelta_ACTION_DELETE:
+		return ketoapi.ActionDelete
+	default:
+		return ketoapi.PatchAction(action.String())
+	}
+}
+
+func protoDeltas(deltas []*rts.RelationTupleDelta) ([]tupleDelta, error) {
+	result := make([]tupleDelta, 0, len(deltas))
 	for _, d := range deltas {
-		if d.Action == action {
-			it, err := (&ketoapi.RelationTuple{}).FromDataProvider(d.RelationTuple)
+		if d.GetAction() == rts.RelationTupleDelta_ACTION_UNSPECIFIED {
+			continue
+		}
+
+		var relationTuple *ketoapi.RelationTuple
+		if d.GetRelationTuple() != nil {
+			var err error
+			relationTuple, err = (&ketoapi.RelationTuple{}).FromDataProvider(d.GetRelationTuple())
 			if err != nil {
 				return nil, err
 			}
-			filtered = append(filtered, it)
 		}
+		result = append(result, tupleDelta{
+			action:        protoAction(d.GetAction()),
+			relationTuple: relationTuple,
+		})
 	}
-	return
+	return result, nil
 }
 
-func (h *WriteHandler) TransactRelationTuples(ctx context.Context, req *connect.Request[rts.TransactRelationTuplesRequest]) (*connect.Response[rts.TransactRelationTuplesResponse], error) {
-	insertTuples, err := protoTuplesWithAction(req.Msg.RelationTupleDeltas, rts.RelationTupleDelta_ACTION_INSERT)
-	if err != nil {
-		return nil, err
+func patchDeltas(deltas []*ketoapi.PatchDelta) []tupleDelta {
+	result := make([]tupleDelta, len(deltas))
+	for i, d := range deltas {
+		if d == nil {
+			continue
+		}
+		result[i] = tupleDelta{
+			action:        d.Action,
+			relationTuple: d.RelationTuple,
+		}
 	}
+	return result
+}
 
-	deleteTuples, err := protoTuplesWithAction(req.Msg.RelationTupleDeltas, rts.RelationTupleDelta_ACTION_DELETE)
-	if err != nil {
-		return nil, err
+func validateAndFilterDeltas(deltas []tupleDelta) (insert, delete []*ketoapi.RelationTuple, err error) {
+	for _, d := range deltas {
+		if d.relationTuple == nil {
+			return nil, nil, errors.WithStack(herodot.ErrBadRequest().WithError("relation_tuple is missing"))
+		}
+		if err := d.relationTuple.Validate(); err != nil {
+			return nil, nil, err
+		}
+
+		switch d.action {
+		case ketoapi.ActionInsert:
+			insert = append(insert, d.relationTuple)
+		case ketoapi.ActionDelete:
+			delete = append(delete, d.relationTuple)
+		default:
+			return nil, nil, errors.WithStack(herodot.ErrBadRequest().WithError("unknown action " + string(d.action)))
+		}
 	}
+	return insert, delete, nil
+}
 
-	err = h.d.RelationTupleManager().Transaction(ctx, func(ctx context.Context) error {
-		its, err := h.d.Mapper().FromTuple(ctx, append(insertTuples, deleteTuples...)...)
+func (h *WriteHandler) transactRelationTuples(ctx context.Context, insert, delete []*ketoapi.RelationTuple) error {
+	return h.d.RelationTupleManager().Transaction(ctx, func(ctx context.Context) error {
+		tuples := make([]*ketoapi.RelationTuple, 0, len(insert)+len(delete))
+		tuples = append(tuples, insert...)
+		tuples = append(tuples, delete...)
+
+		its, err := h.d.Mapper().FromTuple(ctx, tuples...)
 		if err != nil {
 			return err
 		}
-		return h.d.RelationTupleManager().TransactRelationTuples(ctx, its[:len(insertTuples)], its[len(insertTuples):])
+		return h.d.RelationTupleManager().TransactRelationTuples(ctx, its[:len(insert)], its[len(insert):])
 	})
+}
 
+func (h *WriteHandler) TransactRelationTuples(ctx context.Context, req *connect.Request[rts.TransactRelationTuplesRequest]) (*connect.Response[rts.TransactRelationTuplesResponse], error) {
+	deltas, err := protoDeltas(req.Msg.GetRelationTupleDeltas())
 	if err != nil {
+		return nil, err
+	}
+
+	insertTuples, deleteTuples, err := validateAndFilterDeltas(deltas)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := h.transactRelationTuples(ctx, insertTuples, deleteTuples); err != nil {
 		return nil, err
 	}
 
@@ -240,15 +307,6 @@ func (h *WriteHandler) deleteRelations(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func internalTuplesWithAction(deltas []*ketoapi.PatchDelta, action ketoapi.PatchAction) (filtered []*ketoapi.RelationTuple) {
-	for _, d := range deltas {
-		if d.Action == action {
-			filtered = append(filtered, d.RelationTuple)
-		}
-	}
-	return
-}
-
 // swagger:route PATCH /admin/relation-tuples relationship patchRelationships
 //
 // # Patch Multiple Relationships
@@ -279,37 +337,14 @@ func (h *WriteHandler) patchRelationTuples(w http.ResponseWriter, r *http.Reques
 		h.d.Writer().WriteError(w, r, herodot.ErrBadRequest().WithError(err.Error()))
 		return
 	}
-	for _, d := range deltas {
-		if d.RelationTuple == nil {
-			h.d.Writer().WriteError(w, r, herodot.ErrBadRequest().WithError("relation_tuple is missing"))
-			return
-		}
-		if err := d.RelationTuple.Validate(); err != nil {
-			h.d.Writer().WriteError(w, r, err)
-			return
-		}
 
-		switch d.Action {
-		case ketoapi.ActionInsert, ketoapi.ActionDelete:
-		default:
-			h.d.Writer().WriteError(w, r, herodot.ErrBadRequest().WithError("unknown action "+string(d.Action)))
-			return
-		}
+	insertTuples, deleteTuples, err := validateAndFilterDeltas(patchDeltas(deltas))
+	if err != nil {
+		h.d.Writer().WriteError(w, r, err)
+		return
 	}
 
-	insertTuples := internalTuplesWithAction(deltas, ketoapi.ActionInsert)
-	deleteTuples := internalTuplesWithAction(deltas, ketoapi.ActionDelete)
-
-	err := h.d.RelationTupleManager().Transaction(ctx, func(ctx context.Context) error {
-		its, err := h.d.Mapper().FromTuple(ctx, append(insertTuples, deleteTuples...)...)
-		if err != nil {
-			h.d.Logger().WithError(err).Errorf("got an error while mapping fields to UUID")
-			return err
-		}
-		return h.d.RelationTupleManager().TransactRelationTuples(ctx, its[:len(insertTuples)], its[len(insertTuples):])
-	})
-
-	if err != nil {
+	if err := h.transactRelationTuples(ctx, insertTuples, deleteTuples); err != nil {
 		h.d.Writer().WriteError(w, r, err)
 		return
 	}
