@@ -215,66 +215,77 @@ func (b *treeBuilder) buildTreeDirect(ctx context.Context, subSet *relationtuple
 	return tree, nil
 }
 
-// buildTreeForRewrite expands a subject set using an OPL-defined rewrite rule.
+// buildTreeForRewrite expands a subject set using the shared rewrite traversal.
 // OPL rewrite children are structural (never paginated); only data nodes (direct
 // relation tuples fetched from the DB) can be paginated.
 func (b *treeBuilder) buildTreeForRewrite(ctx context.Context, subSet *relationtuple.SubjectSet, rewrite ast.Child, restDepth int) (*relationtuple.Tree, error) {
-	switch rewrite := rewrite.(type) {
-	case *ast.SubjectSetRewrite:
-		tree := newNode(ketoapi.TreeNodeUnion, subSet)
-		if rewrite.Operation == ast.OperatorAnd {
-			tree.Type = ketoapi.TreeNodeIntersection
-		}
+	return ast.Walk(ctx, rewrite, rewriteTreeVisitor{
+		builder:   b,
+		subSet:    subSet,
+		restDepth: restDepth,
+	})
+}
 
-		children := slices.SortedFunc(slices.Values(rewrite.Children), func(a, b ast.Child) int {
-			return rewriteCostOrder(a) - rewriteCostOrder(b)
-		})
+type rewriteTreeVisitor struct {
+	builder   *treeBuilder
+	subSet    *relationtuple.SubjectSet
+	restDepth int
+}
 
-		for _, childRewrite := range children {
-			childTree, err := b.buildTreeForRewrite(ctx, subSet, childRewrite, restDepth)
-			if err != nil {
-				return nil, err
-			}
+func (v rewriteTreeVisitor) VisitComputedSubjectSet(ctx context.Context, node *ast.ComputedSubjectSet) (*relationtuple.Tree, error) {
+	return v.builder.buildTreeRecursive(ctx, &relationtuple.SubjectSet{
+		Namespace: v.subSet.Namespace,
+		Object:    v.subSet.Object,
+		Relation:  node.Relation,
+	}, v.restDepth-1)
+}
 
-			// SubjectSetRewrite followed by another SubjectSetRewrite means compound expression;
-			// The subject of the 2nd rewrite is not meaningful at that point.
-			// ex: view = A AND (B OR C) -> (B OR C) has no meaningul subject
-			if childTree != nil {
-				if _, ok := childRewrite.(*ast.SubjectSetRewrite); ok {
-					childTree.Subject = nil
-				}
-				tree.Children = append(tree.Children, childTree)
-			}
-		}
-		return tree, nil
+func (v rewriteTreeVisitor) VisitTupleToSubjectSet(ctx context.Context, node *ast.TupleToSubjectSet) (*relationtuple.Tree, error) {
+	return v.builder.buildTreeTupleToSubjectSet(ctx, v.subSet, node, nil, v.restDepth)
+}
 
-	case *ast.ComputedSubjectSet:
-		return b.buildTreeRecursive(ctx, &relationtuple.SubjectSet{
-			Namespace: subSet.Namespace,
-			Object:    subSet.Object,
-			Relation:  rewrite.Relation,
-		}, restDepth-1)
-	case *ast.TupleToSubjectSet:
-		return b.buildTreeTupleToSubjectSet(ctx, subSet, rewrite, nil, restDepth)
-	case *ast.InvertResult:
-		// inversion never has a meaningful Subject
-		invertNode := newNode(ketoapi.TreeNodeExclusion, nil)
-		childTree, err := b.buildTreeForRewrite(ctx, subSet, rewrite.Child, restDepth)
+func (v rewriteTreeVisitor) VisitSubjectSetRewrite(ctx context.Context, node *ast.SubjectSetRewrite, children ast.Children, walk ast.WalkFunc[*relationtuple.Tree]) (*relationtuple.Tree, error) {
+	tree := newNode(ketoapi.TreeNodeUnion, v.subSet)
+	if node.Operation == ast.OperatorAnd {
+		tree.Type = ketoapi.TreeNodeIntersection
+	}
+
+	for _, childRewrite := range children {
+		childTree, err := walk(ctx, childRewrite)
 		if err != nil {
 			return nil, err
 		}
 
+		// SubjectSetRewrite followed by another SubjectSetRewrite means compound expression;
+		// The subject of the 2nd rewrite is not meaningful at that point.
+		// ex: view = A AND (B OR C) -> (B OR C) has no meaningful subject
 		if childTree != nil {
-			// any compound operation under an InvertResult also has no meaningful subject
-			// ex: view = !(A OR B)
-			if _, ok := rewrite.Child.(*ast.SubjectSetRewrite); ok {
+			if kind, _ := ast.Dispatch(childRewrite); kind == ast.ChildKindSubjectSetRewrite {
 				childTree.Subject = nil
 			}
-			invertNode.Children = []*relationtuple.Tree{childTree}
+			tree.Children = append(tree.Children, childTree)
 		}
-		return invertNode, nil
 	}
-	return nil, nil
+	return tree, nil
+}
+
+func (v rewriteTreeVisitor) VisitInvertResult(ctx context.Context, node *ast.InvertResult, walk ast.WalkFunc[*relationtuple.Tree]) (*relationtuple.Tree, error) {
+	// inversion never has a meaningful Subject
+	invertNode := newNode(ketoapi.TreeNodeExclusion, nil)
+	childTree, err := walk(ctx, node.Child)
+	if err != nil {
+		return nil, err
+	}
+
+	if childTree != nil {
+		// any compound operation under an InvertResult also has no meaningful subject
+		// ex: view = !(A OR B)
+		if kind, _ := ast.Dispatch(node.Child); kind == ast.ChildKindSubjectSetRewrite {
+			childTree.Subject = nil
+		}
+		invertNode.Children = []*relationtuple.Tree{childTree}
+	}
+	return invertNode, nil
 }
 
 // buildTreeTupleToSubjectSet finds subject sets under subSet#child.Relation, and for each,
@@ -377,21 +388,4 @@ func newNode(typ ketoapi.TreeNodeType, subSet relationtuple.Subject) *relationtu
 
 func (b *treeBuilder) isMaxNodeLimit() bool {
 	return b.nodeCount >= b.maxNodes
-}
-
-// rewriteCostOrder returns a sort key for rewrite children so that cheaper,
-// direct lookups are evaluated before more expensive traversals.
-func rewriteCostOrder(c ast.Child) int {
-	switch c.(type) {
-	case *ast.ComputedSubjectSet:
-		return 0
-	case *ast.TupleToSubjectSet:
-		return 1
-	case *ast.SubjectSetRewrite:
-		return 2
-	case *ast.InvertResult:
-		return 3
-	default:
-		return 4
-	}
 }

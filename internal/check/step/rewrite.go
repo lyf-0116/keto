@@ -6,17 +6,16 @@ package step
 import (
 	"context"
 
-	"github.com/pkg/errors"
-
 	"github.com/ory/keto/internal/check"
 	"github.com/ory/keto/internal/namespace"
 	"github.com/ory/keto/internal/namespace/ast"
 	"github.com/ory/keto/internal/relationtuple"
 )
 
-// RewriteStep evaluates a SubjectSetRewrite node (OR or AND).
-// It translates the rewrite's children into PlannedSteps via planRewrite and
-// then delegates to RunUnion (OR) or RunIntersection (AND).
+// RewriteStep evaluates a SubjectSetRewrite node (OR or AND) using the shared
+// rewrite traversal. It translates the rewrite's children into PlannedSteps and
+// then delegates to RunUnion (OR) or RunIntersection (AND), preserving the
+// check engine's short-circuit semantics.
 type RewriteStep struct {
 	Rewrite *ast.SubjectSetRewrite
 }
@@ -32,15 +31,40 @@ func (s RewriteStep) Execute(ctx context.Context, req check.CheckRequest, ex che
 		WithField("request", req.Tuple.String()).
 		Trace("check subject-set rewrite")
 
-	steps, err := planRewrite(ctx, ex, req, s.Rewrite)
+	result, err := ast.Walk(ctx, s.Rewrite, rewriteCheckVisitor{ex: ex, req: req})
 	if err != nil {
 		return check.Result{Err: err}
 	}
+	return result
+}
 
-	if s.Rewrite.Operation == ast.OperatorAnd {
-		return ex.RunIntersection(ctx, steps...)
+type rewriteCheckVisitor struct {
+	ex  check.Executor
+	req check.CheckRequest
+}
+
+func (v rewriteCheckVisitor) VisitComputedSubjectSet(ctx context.Context, node *ast.ComputedSubjectSet) (check.Result, error) {
+	return v.ex.Run(ctx, ComputedUsersetStep{Relation: node.Relation}, v.req), nil
+}
+
+func (v rewriteCheckVisitor) VisitTupleToSubjectSet(ctx context.Context, node *ast.TupleToSubjectSet) (check.Result, error) {
+	return v.ex.Run(ctx, TraverseStep{TTU: node}, v.req), nil
+}
+
+func (v rewriteCheckVisitor) VisitInvertResult(ctx context.Context, node *ast.InvertResult, _ ast.WalkFunc[check.Result]) (check.Result, error) {
+	return v.ex.Run(ctx, InvertStep{Child: node.Child}, v.req), nil
+}
+
+func (v rewriteCheckVisitor) VisitSubjectSetRewrite(ctx context.Context, node *ast.SubjectSetRewrite, children ast.Children, _ ast.WalkFunc[check.Result]) (check.Result, error) {
+	steps, err := planRewriteChildren(ctx, v.ex, v.req, node, children)
+	if err != nil {
+		return check.Result{}, err
 	}
-	return ex.RunUnion(ctx, steps...)
+
+	if node.Operation == ast.OperatorAnd {
+		return v.ex.RunIntersection(ctx, steps...), nil
+	}
+	return v.ex.RunUnion(ctx, steps...), nil
 }
 
 // planRewrite translates a SubjectSetRewrite AST node into a flat list of
@@ -48,18 +72,22 @@ func (s RewriteStep) Execute(ctx context.Context, req check.CheckRequest, ex che
 // ComputedSubjectSet children in an OR are batched into a single
 // DirectMultiStep followed by individual IsAllowedStep calls.
 func planRewrite(ctx context.Context, ex check.Executor, req check.CheckRequest, rewrite *ast.SubjectSetRewrite) ([]check.PlannedStep, error) {
+	return planRewriteChildren(ctx, ex, req, rewrite, ast.OrderedChildren(rewrite))
+}
+
+func planRewriteChildren(ctx context.Context, ex check.Executor, req check.CheckRequest, rewrite *ast.SubjectSetRewrite, children ast.Children) ([]check.PlannedStep, error) {
 	var steps []check.PlannedStep
-	handled := make(map[int]struct{}, len(rewrite.Children))
+	handled := make(map[int]struct{}, len(children))
 
 	// OR shortcut: batch all ComputedSubjectSet children into one DirectMulti
 	// check plus individual IsAllowed calls (matching the current engine's
 	// OR-of-computed-usersets optimization).
 	if rewrite.Operation == ast.OperatorOr {
 		var computedRelations []string
-		for i, child := range rewrite.Children {
-			if c, ok := child.(*ast.ComputedSubjectSet); ok {
+		for i, child := range children {
+			if kind, _ := ast.Dispatch(child); kind == ast.ChildKindComputedSubjectSet {
 				handled[i] = struct{}{}
-				computedRelations = append(computedRelations, c.Relation)
+				computedRelations = append(computedRelations, child.(*ast.ComputedSubjectSet).Relation)
 			}
 		}
 
@@ -109,18 +137,17 @@ func planRewrite(ctx context.Context, ex check.Executor, req check.CheckRequest,
 	}
 
 	// Process remaining (non-shortcut) children.
-	for i, child := range rewrite.Children {
+	for i, child := range children {
 		if _, ok := handled[i]; ok {
 			continue
 		}
-		step, err := rewriteChildToStep(child)
+		step, err := rewriteChildToStep(ctx, child)
 		if err != nil {
 			return nil, err
 		}
 
 		childReq := req
-		switch child.(type) {
-		case *ast.SubjectSetRewrite:
+		if kind, _ := ast.Dispatch(child); kind == ast.ChildKindSubjectSetRewrite {
 			childReq = req.WithDepth(req.RestDepth - 1)
 		}
 
@@ -132,17 +159,24 @@ func planRewrite(ctx context.Context, ex check.Executor, req check.CheckRequest,
 
 // rewriteChildToStep converts a single rewrite AST child node into an
 // executable Step. Returns an error for unrecognised node types.
-func rewriteChildToStep(child ast.Child) (check.Step, error) {
-	switch c := child.(type) {
-	case *ast.TupleToSubjectSet:
-		return TraverseStep{TTU: c}, nil
-	case *ast.ComputedSubjectSet:
-		return ComputedUsersetStep{Relation: c.Relation}, nil
-	case *ast.SubjectSetRewrite:
-		return RewriteStep{Rewrite: c}, nil
-	case *ast.InvertResult:
-		return InvertStep{Child: c.Child}, nil
-	default:
-		return nil, errors.New("not implemented: unknown rewrite child type")
-	}
+func rewriteChildToStep(ctx context.Context, child ast.Child) (check.Step, error) {
+	return ast.Walk(ctx, child, rewriteStepVisitor{})
+}
+
+type rewriteStepVisitor struct{}
+
+func (rewriteStepVisitor) VisitComputedSubjectSet(_ context.Context, node *ast.ComputedSubjectSet) (check.Step, error) {
+	return ComputedUsersetStep{Relation: node.Relation}, nil
+}
+
+func (rewriteStepVisitor) VisitTupleToSubjectSet(_ context.Context, node *ast.TupleToSubjectSet) (check.Step, error) {
+	return TraverseStep{TTU: node}, nil
+}
+
+func (rewriteStepVisitor) VisitSubjectSetRewrite(_ context.Context, node *ast.SubjectSetRewrite, _ ast.Children, _ ast.WalkFunc[check.Step]) (check.Step, error) {
+	return RewriteStep{Rewrite: node}, nil
+}
+
+func (rewriteStepVisitor) VisitInvertResult(_ context.Context, node *ast.InvertResult, _ ast.WalkFunc[check.Step]) (check.Step, error) {
+	return InvertStep{Child: node.Child}, nil
 }

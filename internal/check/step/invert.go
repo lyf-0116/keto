@@ -23,7 +23,7 @@ func (s InvertStep) Execute(ctx context.Context, req check.CheckRequest, ex chec
 		WithField("request", req.Tuple.String()).
 		Trace("invert check")
 
-	childStep, err := rewriteChildToStep(s.Child)
+	childStep, err := rewriteChildToStep(ctx, s.Child)
 	if err != nil {
 		return check.Result{Err: err}
 	}
